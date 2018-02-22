@@ -7,7 +7,7 @@ before_script: |
   else echo "cargo-web already installed"; \
   fi
 script:
-  - cargo web deploy --release
+  - cargo web deploy
 deploy:
   provider: pages
   local-dir: target/deploy
