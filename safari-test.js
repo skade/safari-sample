@@ -294,6 +294,9 @@ Module.STDWEB_PRIVATE.to_js_string = function to_js_string( index, length ) {
                     w = HEAPU8[ index++ ];
                 }
                 ch = (init & 7) << 18 | ((y_z << 6) | (w & 63));
+
+                output += String.fromCharCode( 0xD7C0 + (ch >> 10) );
+                ch = 0xDC00 + (ch & 0x3FF);
             }
         }
         output += String.fromCharCode( ch );
@@ -302,62 +305,64 @@ Module.STDWEB_PRIVATE.to_js_string = function to_js_string( index, length ) {
     return output;
 };
 
-var id_to_ref_map = {};
-var id_to_refcount_map = {};
-var ref_to_id_map = new WeakMap();
-var last_refid = 1;
+Module.STDWEB_PRIVATE.id_to_ref_map = {};
+Module.STDWEB_PRIVATE.id_to_refcount_map = {};
+Module.STDWEB_PRIVATE.ref_to_id_map = new WeakMap();
+Module.STDWEB_PRIVATE.last_refid = 1;
 
-var id_to_raw_value_map = {};
-var last_raw_value_id = 1;
+Module.STDWEB_PRIVATE.id_to_raw_value_map = {};
+Module.STDWEB_PRIVATE.last_raw_value_id = 1;
 
 Module.STDWEB_PRIVATE.acquire_rust_reference = function( reference ) {
     if( reference === undefined || reference === null ) {
         return 0;
     }
 
-    var refid = ref_to_id_map.get( reference );
+    var refid = Module.STDWEB_PRIVATE.ref_to_id_map.get( reference );
     if( refid === undefined ) {
-        refid = last_refid++;
-        ref_to_id_map.set( reference, refid );
-        id_to_ref_map[ refid ] = reference;
-        id_to_refcount_map[ refid ] = 1;
+        refid = Module.STDWEB_PRIVATE.last_refid++;
+        Module.STDWEB_PRIVATE.ref_to_id_map.set( reference, refid );
+        Module.STDWEB_PRIVATE.id_to_ref_map[ refid ] = reference;
+        Module.STDWEB_PRIVATE.id_to_refcount_map[ refid ] = 1;
     } else {
-        id_to_refcount_map[ refid ]++;
+        Module.STDWEB_PRIVATE.id_to_refcount_map[ refid ]++;
     }
 
     return refid;
 };
 
 Module.STDWEB_PRIVATE.acquire_js_reference = function( refid ) {
-    return id_to_ref_map[ refid ];
+    return Module.STDWEB_PRIVATE.id_to_ref_map[ refid ];
 };
 
 Module.STDWEB_PRIVATE.increment_refcount = function( refid ) {
-    id_to_refcount_map[ refid ]++;
+    Module.STDWEB_PRIVATE.id_to_refcount_map[ refid ]++;
 };
 
 Module.STDWEB_PRIVATE.decrement_refcount = function( refid ) {
+    var id_to_refcount_map = Module.STDWEB_PRIVATE.id_to_refcount_map;
+    var id_to_ref_map = Module.STDWEB_PRIVATE.id_to_ref_map;
     id_to_refcount_map[ refid ]--;
     if( id_to_refcount_map[ refid ] === 0 ) {
         var reference = id_to_ref_map[ refid ];
         delete id_to_ref_map[ refid ];
         delete id_to_refcount_map[ refid ];
-        ref_to_id_map.delete( reference );
+        Module.STDWEB_PRIVATE.ref_to_id_map.delete( reference );
     }
 };
 
 Module.STDWEB_PRIVATE.register_raw_value = function( value ) {
-    var id = last_raw_value_id++;
-    id_to_raw_value_map[ id ] = value;
+    var id = Module.STDWEB_PRIVATE.last_raw_value_id++;
+    Module.STDWEB_PRIVATE.id_to_raw_value_map[ id ] = value;
     return id;
 };
 
 Module.STDWEB_PRIVATE.unregister_raw_value = function( id ) {
-    delete id_to_raw_value_map[ id ];
+    delete Module.STDWEB_PRIVATE.id_to_raw_value_map[ id ];
 };
 
 Module.STDWEB_PRIVATE.get_raw_value = function( id ) {
-    return id_to_raw_value_map[ id ];
+    return Module.STDWEB_PRIVATE.id_to_raw_value_map[ id ];
 }
 
 Module.STDWEB_PRIVATE.alloc = function alloc( size ) {
@@ -365,6 +370,56 @@ Module.STDWEB_PRIVATE.alloc = function alloc( size ) {
 };
 
 Module.STDWEB_PRIVATE.dyncall = function( signature, ptr, args ) {
+    return Module.web_table.get( ptr ).apply( null, args );
+};
+
+// This is based on code from Emscripten's preamble.js.
+Module.STDWEB_PRIVATE.utf8_len = function utf8_len( str ) {
+    let len = 0;
+    for( let i = 0; i < str.length; ++i ) {
+        // Gotcha: charCodeAt returns a 16-bit word that is a UTF-16 encoded code unit, not a Unicode code point of the character! So decode UTF16->UTF32->UTF8.
+        // See http://unicode.org/faq/utf_bom.html#utf16-3
+        let u = str.charCodeAt( i ); // possibly a lead surrogate
+        if( u >= 0xD800 && u <= 0xDFFF ) {
+            u = 0x10000 + ((u & 0x3FF) << 10) | (str.charCodeAt( ++i ) & 0x3FF);
+        }
+
+        if( u <= 0x7F ) {
+            ++len;
+        } else if( u <= 0x7FF ) {
+            len += 2;
+        } else if( u <= 0xFFFF ) {
+            len += 3;
+        } else if( u <= 0x1FFFFF ) {
+            len += 4;
+        } else if( u <= 0x3FFFFFF ) {
+            len += 5;
+        } else {
+            len += 6;
+        }
+    }
+    return len;
+};
+
+Module.STDWEB_PRIVATE.prepare_any_arg = function( value ) {
+    var arg = Module.STDWEB_PRIVATE.alloc( 16 );
+    Module.STDWEB_PRIVATE.from_js( arg, value );
+    return arg;
+};
+
+Module.STDWEB_PRIVATE.acquire_tmp = function( dummy ) {
+    var value = Module.STDWEB_PRIVATE.tmp;
+    Module.STDWEB_PRIVATE.tmp = null;
+    return value;
+};
+
+Module.STDWEB_PRIVATE.alloc = function alloc( size ) {
+    return Module.web_malloc( size );
+};
+
+Module.STDWEB_PRIVATE.dyncall = function( signature, ptr, args ) {
+    console.log(signature, ptr, args);
+    console.log(Module.web_table.get( ptr ))
     return Module.web_table.get( ptr ).apply( null, args );
 };
 
