@@ -8,6 +8,7 @@ use stdweb::web::event::ClickEvent;
 use stdweb::web::IParentNode;
 use stdweb::web::IEventTarget;
 
+
 fn main() {
     stdweb::initialize();
 
