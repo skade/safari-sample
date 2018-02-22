@@ -420,7 +420,7 @@ Module.STDWEB_PRIVATE.alloc = function alloc( size ) {
 Module.STDWEB_PRIVATE.dyncall = function( signature, ptr, args ) {
     console.log(signature, ptr, args);
     console.log(Module.web_table.get( ptr ))
-    return Module.web_table.get( ptr ).apply( null, args );
+    return Module.web_table.get( ptr ).apply( signature, args );
 };
 
 // This is based on code from Emscripten's preamble.js.
